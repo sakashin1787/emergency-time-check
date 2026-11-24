@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#10251d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="救急TIME">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>救急活動 TIME CHECK</title>
+<style>
+:root{color-scheme:dark;--bg:#0c1713;--panel:#172720;--line:#30483c;--muted:#a7b9ae;--green:#39c879;--red:#ff7373}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#f4f8f5;font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif;padding:env(safe-area-inset-top) 14px calc(18px + env(safe-area-inset-bottom))}
+main{max-width:680px;margin:auto}.head{text-align:center;padding:18px 0 14px}.head h1{font-size:21px;margin:0 0 12px;letter-spacing:.04em}.status{display:inline-block;padding:5px 12px;border-radius:20px;background:#39443e;color:#d4ded8;font-size:12px}.status.live{background:#164c32;color:#9ff0bd}.clock{font-size:clamp(34px,10vw,48px);font-weight:750;letter-spacing:.04em;font-variant-numeric:tabular-nums;margin:9px 0 0}.sub{font-size:12px;color:var(--muted);margin-top:3px}.elapsed{font-size:22px;color:var(--green);font-weight:700;font-variant-numeric:tabular-nums;margin-top:8px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:14px 0 18px}button{font:inherit;border:0;cursor:pointer;touch-action:manipulation}.primary,.secondary{min-height:52px;border-radius:13px;font-weight:700}.primary{background:var(--green);color:#062013}.secondary{background:#25382e;color:#f4f8f5;border:1px solid var(--line)}.danger{background:#3a2222;color:#ffc4c4;border:1px solid #754040}.section{display:flex;justify-content:space-between;align-items:center;margin:10px 2px}.section strong{font-size:15px}.count{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.item{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:12px;min-width:0}.item.done{border:2px solid #218c54;padding:11px}.tap{width:100%;min-height:92px;background:transparent;color:inherit;text-align:left;padding:0;display:flex;flex-direction:column;justify-content:space-between;gap:9px}.itemname{font-weight:750;font-size:16px;display:flex;justify-content:space-between;gap:4px}.time{font-size:20px;font-weight:750;font-variant-numeric:tabular-nums;letter-spacing:.02em}.duration{font-size:14px;color:var(--green);font-weight:700;font-variant-numeric:tabular-nums}.hint{font-size:11px;color:var(--muted)}.itemtools{display:flex;justify-content:flex-end;margin-top:5px}.undo{background:transparent;color:#c5d2ca;text-decoration:underline;font-size:12px;padding:5px 2px}.note{color:var(--muted);font-size:11px;line-height:1.6;margin:18px 2px 8px}.footer{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:15px}.footer button{font-size:13px;padding:10px 12px;border-radius:10px}.toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#eaf7ef;color:#10251d;padding:10px 16px;border-radius:20px;font-size:13px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s}.toast.show{opacity:1}
+@media(min-width:560px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<main>
+<header class="head">
+<h1>救急活動 TIME CHECK</h1>
+<span class="status" id="status">未計測</span>
+<div class="clock" id="startClock">--:--:--</div>
+<div class="sub">活動開始時刻（実時刻）</div>
+<div class="elapsed" id="totalElapsed">経過時間 --:--:--</div>
+</header>
+<div class="actions">
+<button class="primary" id="startBtn">▶ 活動開始</button>
+<button class="secondary danger" id="finishBtn">■ 活動終了</button>
+</div>
+<div class="section"><strong>活動記録</strong><span class="count" id="count">0 / 12 件</span></div>
+<div class="grid" id="grid"></div>
+<p class="note">各項目をタップすると、その瞬間の実時刻と活動開始からの経過時間を記録します。記録済み項目を再タップすると時刻を更新します。「取消」で個別記録を消せます。記録はこの端末内に保存され、画面を閉じても残ります。</p>
+<div class="footer">
+<button class="secondary" id="exportBtn">記録をCSV保存</button>
+<button class="secondary danger" id="resetBtn">全記録をリセット</button>
+</div>
+<p class="note">補助用タイマーです。公式記録の代用にせず、実運用前に所属機関の手順・端末設定・時刻精度・オフライン動作を確認してください。</p>
+</main>
+<div class="toast" id="toast"></div>
+<script>
+const ITEMS=["IC","除細動①","除細動②","除細動③","ルート","薬剤①","薬剤②","薬剤③","薬剤④","薬剤⑤","デバイス①","デバイス②"];
+const KEY="emergency-time-check-v1";
+let state={start:null,finish:null,records:{}};
+const $=id=>document.getElementById(id);
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&typeof s==="object")state={...state,...s};}catch(e){}}
+function save(){localStorage.setItem(KEY,JSON.stringify(state));}
+function pad(n){return String(n).padStart(2,"0")}
+function clock(t){const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
+function duration(ms){let s=Math.max(0,Math.floor(ms/1000));let h=Math.floor(s/3600);s%=3600;return `${pad(h)}:${pad(Math.floor(s/60))}:${pad(s%60)}`}
+function elapsed(t){return state.start===null?"--:--:--":duration(t-state.start)}
+function render(){
+ $("status").textContent=state.start===null?"未計測":state.finish===null?"計測中":"活動終了";
+ $("status").className="status"+(state.start!==null&&state.finish===null?" live":"");
+ $("startClock").textContent=state.start===null?"--:--:--":clock(state.start);
+ const now=state.finish??Date.now();
+ $("totalElapsed").textContent="経過時間 "+(state.start===null?"--:--:--":duration(now-state.start));
+ $("count").textContent=Object.keys(state.records).length+" / 12 件";
+ $("startBtn").disabled=state.start!==null;
+ $("startBtn").style.opacity=state.start!==null?".45":"1";
+ $("finishBtn").disabled=state.start===null||state.finish!==null;
+ $("finishBtn").style.opacity=$("finishBtn").disabled?".45":"1";
+ $("grid").innerHTML=ITEMS.map((name,i)=>{
+  const t=state.records[name],done=t!==undefined;
+  return `<article class="item ${done?"done":""}">
+   <button class="tap" data-name="${name}" ${state.start===null||state.finish!==null?"disabled":""}>
+    <span class="itemname">${name}<span>${done?"✓":""}</span></span>
+    <span><span class="time">${done?clock(t):"--:--:--"}</span><br><span class="duration">${done?"+"+elapsed(t):"未記録"}</span></span>
+   </button>
+   ${done?`<div class="itemtools"><button class="undo" data-undo="${name}">この記録を取消</button></div>`:""}
+  </article>`;
+ }).join("");
+ document.querySelectorAll("[data-name]").forEach(b=>b.addEventListener("click",()=>{state.records[b.dataset.name]=Date.now();save();render();toast(b.dataset.name+" を記録しました")}));
+ document.querySelectorAll("[data-undo]").forEach(b=>b.addEventListener("click",()=>{delete state.records[b.dataset.undo];save();render();toast("記録を取り消しました")}));
+}
+function toast(msg){$("toast").textContent=msg;$("toast").classList.add("show");setTimeout(()=>$("toast").classList.remove("show"),1600)}
+$("startBtn").onclick=()=>{if(state.start!==null)return;state={start:Date.now(),finish:null,records:{}};save();render();toast("活動計測を開始しました")};
+$("finishBtn").onclick=()=>{if(state.start===null||state.finish!==null)return;if(confirm("活動を終了しますか？ 終了後は記録できなくなります。")){state.finish=Date.now();save();render();toast("活動を終了しました")}};
+$("resetBtn").onclick=()=>{if(confirm("開始時刻・全項目の記録を削除します。よろしいですか？")){state={start:null,finish:null,records:{}};save();render();toast("全記録をリセットしました")}};
+$("exportBtn").onclick=()=>{
+ if(state.start===null){alert("活動記録がありません");return}
+ const rows=[["項目","実時刻","経過時間"],["活動開始",clock(state.start),"00:00:00"]];
+ ITEMS.forEach(n=>{if(state.records[n]!==undefined)rows.push([n,clock(state.records[n]),elapsed(state.records[n])])});
+ if(state.finish!==null)rows.push(["活動終了",clock(state.finish),elapsed(state.finish)]);
+ const csv="\uFEFF"+rows.map(r=>r.map(x=>'"'+String(x).replaceAll('"','""')+'"').join(",")).join("\r\n");
+ const a=document.createElement("a"),url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+ a.href=url;a.download="救急活動タイム記録_"+new Date(state.start).toISOString().slice(0,10)+".csv";a.click();URL.revokeObjectURL(url);
+};
+load();render();setInterval(()=>{if(state.start!==null&&state.finish===null){$("totalElapsed").textContent="経過時間 "+duration(Date.now()-state.start);document.querySelectorAll(".item.done").forEach(el=>{const name=el.querySelector(".itemname").childNodes[0].textContent.trim();const t=state.records[name];const d=el.querySelector(".duration");if(d&&t!==undefined)d.textContent="+"+elapsed(t)})}},250);
+if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+</script>
+</body></html>
